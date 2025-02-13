@@ -60,6 +60,7 @@
 #include "wayland/meta-wayland-system-bell.h"
 #include "wayland/meta-wayland-tablet-manager.h"
 #include "wayland/meta-wayland-transaction.h"
+#include "wayland/meta-wayland-ui-controls.h"
 #include "wayland/meta-wayland-xdg-dialog.h"
 #include "wayland/meta-wayland-xdg-foreign.h"
 #include "wayland/meta-wayland-xdg-session-manager.h"
@@ -815,6 +816,7 @@ meta_wayland_compositor_finalize (GObject *object)
   meta_wayland_activation_finalize (compositor);
   meta_wayland_outputs_finalize (compositor);
   meta_wayland_presentation_time_finalize (compositor);
+  meta_wayland_ui_controls_finalize (compositor);
 
   g_hash_table_destroy (compositor->scheduled_surface_associations);
 
@@ -1021,6 +1023,7 @@ meta_wayland_compositor_new (MetaContext *context)
   meta_wayland_init_color_management (compositor);
   meta_wayland_xdg_session_management_init (compositor);
   meta_wayland_init_system_bell (compositor);
+  meta_wayland_ui_controls_init (compositor);
 
 #ifdef HAVE_NATIVE_BACKEND
   meta_wayland_drm_lease_manager_init (compositor);

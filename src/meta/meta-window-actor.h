@@ -60,3 +60,11 @@ void meta_window_actor_freeze (MetaWindowActor *self);
 
 META_EXPORT
 void meta_window_actor_thaw (MetaWindowActor *self);
+
+META_EXPORT
+void
+meta_window_actor_transform_relative_position (MetaWindowActor      *self,
+                                               double                x,
+                                               double                y,
+                                               double               *x_out,
+                                               double               *y_out);

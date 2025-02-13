@@ -103,6 +103,7 @@ struct _MetaWaylandCompositor
   MetaWaylandTabletManager *tablet_manager;
   MetaWaylandActivation *activation;
   MetaWaylandXdgForeign *foreign;
+  MetaWaylandUiControls *ui_controls;
   MetaWaylandXdgSessionManager *session_manager;
 
   GHashTable *scheduled_surface_associations;

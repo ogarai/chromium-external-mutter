@@ -52,6 +52,15 @@ static void meta_wayland_input_sync_focus (MetaWaylandInput *input);
 
 G_DEFINE_FINAL_TYPE (MetaWaylandInput, meta_wayland_input, G_TYPE_OBJECT)
 
+enum
+{
+  EVENT_HANDLED,
+
+  N_SIGNALS
+};
+
+static guint signals[N_SIGNALS];
+
 static void
 on_stage_is_grabbed_change (MetaWaylandInput *input)
 {
@@ -86,6 +95,9 @@ meta_wayland_input_class_init (MetaWaylandInputClass *klass)
   GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
   object_class->finalize = meta_wayland_input_finalize;
+  signals[EVENT_HANDLED] = g_signal_new (
+    "event-handled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0,
+    NULL, NULL, NULL, G_TYPE_NONE, 1, CLUTTER_TYPE_EVENT);
 }
 
 MetaWaylandInput *
@@ -393,6 +405,8 @@ meta_wayland_input_handle_event (MetaWaylandInput   *input,
           event_type == CLUTTER_LEAVE)
         break;
     }
+
+  g_signal_emit (input, signals[EVENT_HANDLED], 0, event);
 
   return retval;
 }

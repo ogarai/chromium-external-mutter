@@ -30,6 +30,7 @@
 #include "compositor/meta-window-actor-private.h"
 #include "core/boxes-private.h"
 #include "core/window-private.h"
+#include "meta/meta-window-actor.h"
 #include "meta/window.h"
 
 #ifdef HAVE_X11_CLIENT
@@ -1234,10 +1235,9 @@ meta_window_actor_get_geometry_scale (MetaWindowActor *window_actor)
 }
 
 static void
-meta_window_actor_get_buffer_bounds (MetaScreenCastWindow *screen_cast_window,
-                                     MtkRectangle         *bounds)
+meta_window_actor_get_buffer_bounds (MetaWindowActor *window_actor,
+                                     MtkRectangle    *bounds)
 {
-  MetaWindowActor *window_actor = META_WINDOW_ACTOR (screen_cast_window);
   MetaWindowActorPrivate *priv =
     meta_window_actor_get_instance_private (window_actor);
   MetaShapedTexture *stex;
@@ -1250,20 +1250,26 @@ meta_window_actor_get_buffer_bounds (MetaScreenCastWindow *screen_cast_window,
 }
 
 static void
-meta_window_actor_transform_relative_position (MetaScreenCastWindow *screen_cast_window,
-                                               double                x,
-                                               double                y,
-                                               double               *x_out,
-                                               double               *y_out)
+meta_screen_cast_window_get_buffer_bounds_internal (MetaScreenCastWindow *screen_cast_window,
+                                                    MtkRectangle         *bounds)
+{
+  meta_window_actor_get_buffer_bounds (META_WINDOW_ACTOR (screen_cast_window), bounds);
+}
+
+void
+meta_window_actor_transform_relative_position (MetaWindowActor *window_actor,
+                                               double           x,
+                                               double           y,
+                                               double          *x_out,
+                                               double          *y_out)
 
 {
-  MetaWindowActor *window_actor = META_WINDOW_ACTOR (screen_cast_window);
   MetaWindowActorPrivate *priv =
     meta_window_actor_get_instance_private (window_actor);
   MtkRectangle bounds;
   graphene_point3d_t v1 = { 0.f, }, v2 = { 0.f, };
 
-  meta_window_actor_get_buffer_bounds (screen_cast_window, &bounds);
+  meta_window_actor_get_buffer_bounds (window_actor, &bounds);
 
   v1.x = CLAMP ((float) x,
                 bounds.x,
@@ -1278,6 +1284,21 @@ meta_window_actor_transform_relative_position (MetaScreenCastWindow *screen_cast
 
   *x_out = (double) v2.x;
   *y_out = (double) v2.y;
+}
+
+static void
+meta_screen_cast_window_transform_relative_position_internal (MetaScreenCastWindow *screen_cast_window,
+                                                              double                x,
+                                                              double                y,
+                                                              double               *x_out,
+                                                              double               *y_out)
+
+{
+  meta_window_actor_transform_relative_position (META_WINDOW_ACTOR (screen_cast_window),
+                                                 x,
+                                                 y,
+                                                 x_out,
+                                                 y_out);
 }
 
 static gboolean
@@ -1514,8 +1535,8 @@ meta_window_actor_dec_screen_cast_usage (MetaScreenCastWindow *screen_cast_windo
 static void
 screen_cast_window_iface_init (MetaScreenCastWindowInterface *iface)
 {
-  iface->get_buffer_bounds = meta_window_actor_get_buffer_bounds;
-  iface->transform_relative_position = meta_window_actor_transform_relative_position;
+  iface->get_buffer_bounds = meta_screen_cast_window_get_buffer_bounds_internal;
+  iface->transform_relative_position = meta_screen_cast_window_transform_relative_position_internal;
   iface->transform_cursor_position = meta_window_actor_transform_cursor_position;
   iface->capture_into = meta_window_actor_capture_into;
   iface->blit_to_framebuffer = meta_window_actor_blit_to_framebuffer;

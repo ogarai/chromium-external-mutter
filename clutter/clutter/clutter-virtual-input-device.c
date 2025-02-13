@@ -178,6 +178,17 @@ clutter_virtual_input_device_notify_touch_motion (ClutterVirtualInputDevice *vir
 }
 
 void
+clutter_virtual_input_device_release_pressed (ClutterVirtualInputDevice *virtual_device)
+{
+  ClutterVirtualInputDeviceClass *klass =
+    CLUTTER_VIRTUAL_INPUT_DEVICE_GET_CLASS (virtual_device);
+
+  g_return_if_fail (CLUTTER_IS_VIRTUAL_INPUT_DEVICE (virtual_device));
+
+  klass->release_pressed (virtual_device);
+}
+
+void
 clutter_virtual_input_device_notify_touch_up (ClutterVirtualInputDevice *virtual_device,
                                               uint64_t                   time_us,
                                               int                        slot)

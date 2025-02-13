@@ -10,3 +10,6 @@ runtime-dir
 build
 _build
 builddir
+.cache/
+.clang-format
+compile_commands.json

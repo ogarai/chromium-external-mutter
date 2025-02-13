@@ -105,6 +105,8 @@ struct _ClutterVirtualInputDeviceClass
   void (*notify_touch_up) (ClutterVirtualInputDevice *virtual_device,
                            uint64_t                   time_us,
                            int                        slot);
+
+  void (*release_pressed) (ClutterVirtualInputDevice *virtual_device);
 };
 
 CLUTTER_EXPORT
@@ -169,6 +171,9 @@ CLUTTER_EXPORT
 void clutter_virtual_input_device_notify_touch_up (ClutterVirtualInputDevice *virtual_device,
                                                    uint64_t                   time_us,
                                                    int                        slot);
+
+CLUTTER_EXPORT
+void clutter_virtual_input_device_release_pressed (ClutterVirtualInputDevice *virtual_device);
 
 CLUTTER_EXPORT
 int clutter_virtual_input_device_get_device_type (ClutterVirtualInputDevice *virtual_device);

@@ -76,4 +76,6 @@ typedef struct _MetaWaylandDrmLeaseManager MetaWaylandDrmLeaseManager;
 
 typedef struct _MetaWaylandXdgSessionManager MetaWaylandXdgSessionManager;
 
+typedef struct _MetaWaylandUiControls MetaWaylandUiControls;
+
 typedef struct _MetaWaylandToplevelDrag MetaWaylandToplevelDrag;
