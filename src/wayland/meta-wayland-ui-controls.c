@@ -201,8 +201,7 @@ ui_controls_send_mouse_move (struct wl_client   *client,
                              struct wl_resource *surface_resource,
                              uint32_t            id)
 {
-  MetaWaylandXdgSurface *xdg_surface =
-      wl_resource_get_user_data (surface_resource);
+  MetaWaylandXdgSurface *xdg_surface;
   MetaWaylandSurfaceRole *surface_role;
   MetaWaylandSurface *surface;
   MetaWindow *window;
@@ -217,11 +216,13 @@ ui_controls_send_mouse_move (struct wl_client   *client,
   if (surface_resource)
   // A surface was provided. Use coordinates relative to it.
     {
+      xdg_surface = wl_resource_get_user_data (surface_resource);
       surface_role = META_WAYLAND_SURFACE_ROLE (xdg_surface);
       surface = meta_wayland_surface_role_get_surface (surface_role);
       window = meta_wayland_surface_get_window (surface);
       window_actor = meta_window_actor_from_window (window);
-      meta_window_actor_transform_relative_position (window_actor, x, y, &abs_x, &abs_y);
+      meta_window_actor_transform_relative_position (window_actor, x, y, &abs_x,
+                                                     &abs_y);
     }
   else
   // No surface was provided. Use global coordinates.
