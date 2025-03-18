@@ -41,7 +41,10 @@ enum {
 
 static GParamSpec *props[N_PROPS] = { 0, };
 
-enum {
+enum
+{
+  UPDATE_MOVE_DONE,
+  UPDATE_RESIZE_DONE,
   ENDED,
   LAST_SIGNAL,
 };
@@ -254,6 +257,18 @@ meta_window_drag_class_init (MetaWindowDragClass *klass)
                                            G_PARAM_CONSTRUCT_ONLY |
                                            G_PARAM_STATIC_STRINGS);
 
+  signals[UPDATE_MOVE_DONE] =
+    g_signal_new ("update-move-done",
+                  G_TYPE_FROM_CLASS (object_class),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
+  signals[UPDATE_RESIZE_DONE] =
+    g_signal_new ("update-resize-done",
+                  G_TYPE_FROM_CLASS (object_class),
+                  G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL,
+                  G_TYPE_NONE, 0);
   signals[ENDED] =
     g_signal_new ("ended",
                   G_TYPE_FROM_CLASS (object_class),
@@ -1405,6 +1420,7 @@ update_move_cb (gpointer user_data)
                window_drag->latest_motion_x,
                window_drag->latest_motion_y);
 
+  g_signal_emit (window_drag, signals[UPDATE_MOVE_DONE], 0);
   return G_SOURCE_REMOVE;
 }
 
@@ -1569,6 +1585,7 @@ update_resize_cb (gpointer user_data)
                  window_drag->latest_motion_x,
                  window_drag->latest_motion_y);
 
+  g_signal_emit (window_drag, signals[UPDATE_RESIZE_DONE], 0);
   return G_SOURCE_REMOVE;
 }
 

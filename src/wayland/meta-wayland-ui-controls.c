@@ -26,9 +26,15 @@
 #include <wayland-server-core.h>
 
 #include "clutter/clutter.h"
+#include "compositor/compositor-private.h"
 #include "compositor/meta-window-actor-private.h"
+#include "compositor/meta-window-drag.h"
 #include "gio/gio.h"
 #include "glib-object.h"
+#include "meta/compositor.h"
+#include "meta/display.h"
+#include "meta/meta-context.h"
+#include "meta/meta-debug.h"
 #include "meta/meta-window-actor.h"
 #include "ui-controls-unstable-v1-server-protocol.h"
 #include "wayland/meta-wayland-private.h"
@@ -47,11 +53,16 @@ typedef struct
 typedef struct _MetaWaylandUiControls
 {
   MetaWaylandCompositor *compositor;
+  ClutterStage *stage;
   struct wl_global *global;
   ClutterVirtualInputDevice *virtual_pointer;
   ClutterVirtualInputDevice *virtual_keyboard;
   MetaWaylandEventHandler *event_handler;
+  MetaWindow *window;
+  MetaWindowDrag *window_drag;
   GQueue *requests;
+  GQueue *pointer_move_requests_during_grab;
+  GQueue *pointer_release_requests_during_grab;
 } MetaWaylandUiControls;
 
 static void
@@ -64,9 +75,8 @@ notify_request_done (MetaWaylandUiControlsRequest *request)
 }
 
 static void
-on_wayland_input_event_handled (MetaWaylandInput      *input,
-                                const ClutterEvent    *event,
-                                MetaWaylandUiControls *ui_controls)
+on_wayland_input_event_handled (MetaWaylandUiControls *ui_controls,
+                                const ClutterEvent    *event)
 {
   int n;
   MetaWaylandUiControlsRequest *request;
@@ -86,6 +96,102 @@ on_wayland_input_event_handled (MetaWaylandInput      *input,
     }
 }
 
+static void
+notify_request_done_during_grab (MetaWaylandUiControls *ui_controls,
+                                 const ClutterEventType event_type)
+{
+  int n;
+  MetaWaylandUiControlsRequest *request;
+
+  bool is_motion = event_type == CLUTTER_MOTION;
+  GQueue *requests = is_motion
+                         ? ui_controls->pointer_move_requests_during_grab
+                         : ui_controls->pointer_release_requests_during_grab;
+  guint queue_length = g_queue_get_length (requests);
+  if (!is_motion && queue_length > 1)
+    {
+      // In case a test issues multiple release requests during window
+      // grab, which is unlikely, release all of them on grab end as
+      // best-effort.
+      meta_warning ("Multiple release events were received during window "
+                    "grab, so releasing all of them on grab end. Note: "
+                    "This likely indicates a test bug.");
+    }
+  for (n = 0; n < queue_length; n++)
+    {
+      request = g_queue_peek_nth (requests, n);
+      if (request->type == event_type)
+        {
+          g_queue_remove (requests, request);
+          notify_request_done (request);
+          // Consider one motion event as done.
+          if (is_motion)
+            break;
+        }
+    }
+}
+
+static void
+on_moved_during_grab (MetaWaylandUiControls *ui_controls)
+{
+  meta_topic (META_DEBUG_INPUT, "%s", __func__);
+  notify_request_done_during_grab (ui_controls, CLUTTER_MOTION);
+}
+
+static void
+on_resized_during_grab (MetaWaylandUiControls *ui_controls)
+{
+  meta_topic (META_DEBUG_INPUT, "%s", __func__);
+  notify_request_done_during_grab (ui_controls, CLUTTER_MOTION);
+}
+
+static void
+on_grab_ended (MetaWaylandUiControls *ui_controls)
+{
+  meta_topic (META_DEBUG_INPUT, "%s", __func__);
+  notify_request_done_during_grab (ui_controls, CLUTTER_BUTTON_RELEASE);
+}
+
+/**
+ * Listens for stage grab state and subscribes to window drag signals if a
+ * window drag is found during grab state.
+ **/
+static void
+on_stage_is_grabbed_change (MetaWaylandUiControls *ui_controls)
+{
+  bool stage_has_grab =
+    clutter_stage_get_grab_actor (ui_controls->stage) != NULL;
+  if (stage_has_grab)
+    {
+      MetaContext *context =
+        meta_wayland_compositor_get_context (ui_controls->compositor);
+      MetaDisplay *display = meta_context_get_display (context);
+      MetaCompositor *compositor = meta_display_get_compositor (display);
+
+      ui_controls->window_drag = meta_compositor_get_current_window_drag (
+        META_COMPOSITOR (compositor));
+      meta_topic (META_DEBUG_INPUT, "%s window drag: %p", __func__,
+                  ui_controls->window_drag);
+      if (ui_controls->window_drag)
+        {
+          g_signal_connect_swapped (ui_controls->window_drag, "ended",
+                                    G_CALLBACK (on_grab_ended), ui_controls);
+          g_signal_connect_swapped (
+            ui_controls->window_drag, "update-resize-done",
+            G_CALLBACK (on_resized_during_grab), ui_controls);
+          g_signal_connect_swapped (
+            ui_controls->window_drag, "update-move-done",
+            G_CALLBACK (on_moved_during_grab), ui_controls);
+        }
+    }
+  else
+    {
+      meta_topic (META_DEBUG_INPUT,
+                  "%s stage doesn't have grab, clearing window drag", __func__);
+      ui_controls->window_drag = NULL;
+    }
+}
+
 /**
  * Stores the request until it is processed and `request_processed` is sent.
  **/
@@ -102,6 +208,25 @@ store_request (MetaWaylandUiControls *ui_controls,
   request->id = request_id;
   request->type = type;
   request->time_us = time_us;
+  if (ui_controls->window_drag != NULL)
+  // During window drag, motion and release events may not be handled by the
+  // wayland input handler. So store these requests separately from the
+  // regular requests. Window drag events will signal their completion.
+  // See on_stage_is_grabbed_change().
+    {
+      if (type == CLUTTER_MOTION)
+        {
+          g_queue_push_tail (ui_controls->pointer_move_requests_during_grab,
+                             request);
+          return;
+        }
+      if (type == CLUTTER_BUTTON_RELEASE)
+        {
+          g_queue_push_tail (ui_controls->pointer_release_requests_during_grab,
+                             request);
+          return;
+        }
+    }
   g_queue_push_tail (ui_controls->requests, request);
 }
 
@@ -194,20 +319,44 @@ ui_controls_send_key_events (struct wl_client   *client,
 }
 
 static void
-ui_controls_send_mouse_move (struct wl_client   *client,
-                             struct wl_resource *resource,
-                             int32_t             x,
-                             int32_t             y,
-                             struct wl_resource *surface_resource,
-                             uint32_t            id)
+on_effects_completed (MetaWindowActor *window_actor,
+                      gboolean        *done)
 {
-  MetaWaylandXdgSurface *xdg_surface;
+  meta_topic (META_DEBUG_INPUT, "window effects complete");
+  *done = TRUE;
+}
+
+static void
+wait_for_window_effects_completed (MetaWindowActor *window_actor)
+{
+  meta_topic (META_DEBUG_INPUT, "waiting for window effects to complete");
+  gboolean done = FALSE;
+  gulong handler_id;
+
+  handler_id = g_signal_connect (window_actor, "effects-completed",
+                                 G_CALLBACK (on_effects_completed), &done);
+
+  while (!done)
+    g_main_context_iteration (NULL, TRUE);
+
+  g_signal_handler_disconnect (window_actor, handler_id);
+}
+
+static void
+ui_controls_send_mouse_move(struct wl_client   *client,
+                            struct wl_resource *resource,
+                            int32_t             x,
+                            int32_t             y,
+                            struct wl_resource *surface_resource,
+                            uint32_t            id) {
+  MetaWaylandXdgSurface*xdg_surface;
   MetaWaylandSurfaceRole *surface_role;
   MetaWaylandSurface *surface;
   MetaWindow *window;
   MetaWindowActor *window_actor;
   MetaWaylandUiControls *ui_controls = wl_resource_get_user_data (resource);
   double abs_x, abs_y;
+  bool effects_in_progress = false;
   uint64_t time_us = g_get_monotonic_time ();
 
   meta_topic (META_DEBUG_INPUT, "%s id=%u x=%d y=%d has_surface=%d", __func__,
@@ -221,6 +370,9 @@ ui_controls_send_mouse_move (struct wl_client   *client,
       surface = meta_wayland_surface_role_get_surface (surface_role);
       window = meta_wayland_surface_get_window (surface);
       window_actor = meta_window_actor_from_window (window);
+      effects_in_progress = meta_window_actor_effect_in_progress (window_actor);
+      if (effects_in_progress)
+        wait_for_window_effects_completed (window_actor);
       meta_window_actor_transform_relative_position (window_actor, x, y, &abs_x,
                                                      &abs_y);
     }
@@ -368,6 +520,9 @@ destroy_ui_controls (struct wl_resource *resource)
   clutter_virtual_input_device_release_pressed (ui_controls->virtual_pointer);
   clutter_virtual_input_device_release_pressed (ui_controls->virtual_keyboard);
   g_queue_clear_full (ui_controls->requests, g_free);
+  g_queue_clear_full (ui_controls->pointer_move_requests_during_grab, g_free);
+  g_queue_clear_full (ui_controls->pointer_release_requests_during_grab,
+                      g_free);
 }
 
 static void
@@ -403,6 +558,8 @@ void
 meta_wayland_ui_controls_init (MetaWaylandCompositor *compositor)
 {
   struct wl_display *wayland_display;
+  MetaContext *context;
+  MetaBackend *backend;
 
   compositor->ui_controls = meta_wayland_ui_controls_new (compositor);
   create_virtual_input_devices (compositor->ui_controls);
@@ -421,13 +578,29 @@ meta_wayland_ui_controls_init (MetaWaylandCompositor *compositor)
         g_error ("Could not create ui controls global");
     }
   compositor->ui_controls->requests = g_queue_new ();
-  g_signal_connect (compositor->seat->input_handler, "event-handled",
-                    G_CALLBACK (on_wayland_input_event_handled),
-                    compositor->ui_controls);
+  compositor->ui_controls->pointer_move_requests_during_grab = g_queue_new ();
+  compositor->ui_controls->pointer_release_requests_during_grab =
+    g_queue_new ();
+  g_signal_connect_swapped (compositor->seat->input_handler, "event-handled",
+                            G_CALLBACK (on_wayland_input_event_handled),
+                            compositor->ui_controls);
+  context = meta_wayland_compositor_get_context (compositor);
+  backend = meta_context_get_backend (context);
+  compositor->ui_controls->stage =
+    CLUTTER_STAGE (meta_backend_get_stage (backend));
+  g_signal_connect_swapped (
+    compositor->ui_controls->stage, "notify::is-grabbed",
+    G_CALLBACK (on_stage_is_grabbed_change), compositor->ui_controls);
 }
 
 void
 meta_wayland_ui_controls_finalize (MetaWaylandCompositor *compositor)
 {
+  g_signal_handlers_disconnect_by_func (compositor->ui_controls->stage,
+                                        on_stage_is_grabbed_change,
+                                        compositor->ui_controls);
+  g_signal_handlers_disconnect_by_func (compositor->seat->input_handler,
+                                        on_wayland_input_event_handled,
+                                        compositor->ui_controls);
   g_clear_pointer (&compositor->ui_controls, g_free);
 }
