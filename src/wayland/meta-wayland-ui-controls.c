@@ -100,7 +100,6 @@ static void
 notify_request_done_during_grab (MetaWaylandUiControls *ui_controls,
                                  const ClutterEventType event_type)
 {
-  int n;
   MetaWaylandUiControlsRequest *request;
 
   bool is_motion = event_type == CLUTTER_MOTION;
@@ -117,17 +116,13 @@ notify_request_done_during_grab (MetaWaylandUiControls *ui_controls,
                     "grab, so releasing all of them on grab end. Note: "
                     "This likely indicates a test bug.");
     }
-  for (n = 0; n < queue_length; n++)
+  while (!g_queue_is_empty (requests))
     {
-      request = g_queue_peek_nth (requests, n);
-      if (request->type == event_type)
-        {
-          g_queue_remove (requests, request);
-          notify_request_done (request);
-          // Consider one motion event as done.
-          if (is_motion)
-            break;
-        }
+      request = g_queue_pop_head (requests);
+      notify_request_done (request);
+      // Consider one motion event as done.
+      if (is_motion)
+        break;
     }
 }
 
