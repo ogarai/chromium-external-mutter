@@ -467,7 +467,6 @@ should_constraint_be_enabled (MetaWaylandPointerConstraint *constraint)
   MetaWindow *window;
 
   window = meta_wayland_surface_get_window (constraint->surface);
-#ifdef HAVE_XWAYLAND
   if (!window)
     {
       /*
@@ -481,7 +480,6 @@ should_constraint_be_enabled (MetaWaylandPointerConstraint *constraint)
 #endif
       return FALSE;
     }
-#endif
 
   if (window->unmanaging)
     return FALSE;
