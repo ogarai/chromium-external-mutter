@@ -48,6 +48,7 @@ typedef struct
   uint32_t id;
   ClutterEventType type;
   uint64_t time_us;
+  bool wait_for_pointer_focus;
 } MetaWaylandUiControlsRequest;
 
 typedef struct _MetaWaylandUiControls
@@ -74,12 +75,24 @@ notify_request_done (MetaWaylandUiControlsRequest *request)
   g_free (request);
 }
 
+static gboolean
+set_true (gpointer user_data)
+{
+  gboolean *done = user_data;
+
+  *done = TRUE;
+
+  return G_SOURCE_REMOVE;
+}
+
 static void
 on_wayland_input_event_handled (MetaWaylandUiControls *ui_controls,
                                 const ClutterEvent    *event)
 {
   int n;
+  gboolean timed_out;
   MetaWaylandUiControlsRequest *request;
+  MetaWaylandPointer *pointer = ui_controls->compositor->seat->pointer;
 
   meta_topic (META_DEBUG_INPUT, "%s %s", __func__,
               clutter_event_get_name (event));
@@ -90,6 +103,24 @@ on_wayland_input_event_handled (MetaWaylandUiControls *ui_controls,
           request->time_us == clutter_event_get_time_us (event))
         {
           g_queue_remove (ui_controls->requests, request);
+          if (request->wait_for_pointer_focus)
+            {
+              if (!meta_wayland_pointer_get_focus_surface (pointer))
+                meta_topic (META_DEBUG_INPUT,
+                            "waiting for surface to have pointer focus before "
+                            "signaling done");
+              timed_out = FALSE;
+              guint timeout_id =
+                g_timeout_add_seconds (1, set_true, &timed_out);
+              while (!meta_wayland_pointer_get_focus_surface (pointer) &&
+                     !timed_out)
+                g_main_context_iteration (NULL, TRUE);
+              if (timed_out)
+                meta_warning ("timed out waiting for surface to have pointer "
+                              "focus before signaling done");
+              else
+                g_clear_handle_id (&timeout_id, g_source_remove);
+            }
           notify_request_done (request);
           break;
         }
@@ -195,7 +226,8 @@ store_request (MetaWaylandUiControls *ui_controls,
                struct wl_resource    *resource,
                uint32_t               request_id,
                ClutterEventType       type,
-               uint64_t               time_us)
+               uint64_t               time_us,
+               bool                   wait_for_pointer_focus)
 {
   MetaWaylandUiControlsRequest *request;
   request = g_new0 (MetaWaylandUiControlsRequest, 1);
@@ -203,6 +235,7 @@ store_request (MetaWaylandUiControls *ui_controls,
   request->id = request_id;
   request->type = type;
   request->time_us = time_us;
+  request->wait_for_pointer_focus = wait_for_pointer_focus;
   if (ui_controls->window_drag != NULL)
   // During window drag, motion and release events may not be handled by the
   // wayland input handler. So store these requests separately from the
@@ -310,7 +343,8 @@ ui_controls_send_key_events (struct wl_client   *client,
                         CLUTTER_KEY_STATE_RELEASED);
     }
 
-  store_request (ui_controls, resource, id, event_type, time_us);
+  store_request (ui_controls, resource, id, event_type, time_us,
+                 false /*wait_for_pointer_focus=*/);
 }
 
 static void
@@ -353,6 +387,8 @@ ui_controls_send_mouse_move(struct wl_client   *client,
   double abs_x, abs_y;
   bool effects_in_progress = false;
   uint64_t time_us = g_get_monotonic_time ();
+  // Wait for pointer focus if mouse move was requested relative to a surface.
+  const bool wait_for_pointer_focus = surface_resource != 0;
 
   meta_topic (META_DEBUG_INPUT, "%s id=%u x=%d y=%d has_surface=%d", __func__,
               id, x, y, surface_resource != 0);
@@ -379,7 +415,8 @@ ui_controls_send_mouse_move(struct wl_client   *client,
     }
   clutter_virtual_input_device_notify_absolute_motion (
     ui_controls->virtual_pointer, time_us, abs_x, abs_y);
-  store_request (ui_controls, resource, id, CLUTTER_MOTION, time_us);
+  store_request (ui_controls, resource, id, CLUTTER_MOTION, time_us,
+                 wait_for_pointer_focus);
 }
 
 static void
@@ -435,7 +472,8 @@ ui_controls_send_mouse_button (struct wl_client   *client,
                         CLUTTER_KEY_STATE_RELEASED);
     }
 
-  store_request (ui_controls, resource, id, event_type, time_us);
+  store_request (ui_controls, resource, id, event_type, time_us,
+                 false /*wait_for_pointer_focus=*/);
 }
 
 static void
