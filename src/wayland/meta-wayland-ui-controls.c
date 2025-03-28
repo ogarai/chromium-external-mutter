@@ -54,6 +54,7 @@ typedef struct
 typedef struct _MetaWaylandUiControls
 {
   MetaWaylandCompositor *compositor;
+  bool has_client;
   ClutterStage *stage;
   struct wl_global *global;
   ClutterVirtualInputDevice *virtual_pointer;
@@ -102,7 +103,6 @@ on_wayland_input_event_handled (MetaWaylandUiControls *ui_controls,
       if (request->type == clutter_event_type (event) &&
           request->time_us == clutter_event_get_time_us (event))
         {
-          g_queue_remove (ui_controls->requests, request);
           if (request->wait_for_pointer_focus)
             {
               if (!meta_wayland_pointer_get_focus_surface (pointer))
@@ -114,13 +114,26 @@ on_wayland_input_event_handled (MetaWaylandUiControls *ui_controls,
                 g_timeout_add_seconds (1, set_true, &timed_out);
               while (!meta_wayland_pointer_get_focus_surface (pointer) &&
                      !timed_out)
-                g_main_context_iteration (NULL, TRUE);
+                {
+                  g_main_context_iteration (NULL, TRUE);
+                  // Abort if the ui_controls client was destroyed.
+                  if (!ui_controls->has_client)
+                    {
+                      meta_topic (META_DEBUG_INPUT,
+                                  "aborting wait for pointer focus as "
+                                  "ui_controls client was destroyed");
+                      if (!timed_out)
+                        g_clear_handle_id (&timeout_id, g_source_remove);
+                      return;
+                    }
+                }
               if (timed_out)
                 meta_warning ("timed out waiting for surface to have pointer "
                               "focus before signaling done");
               else
                 g_clear_handle_id (&timeout_id, g_source_remove);
             }
+          g_queue_remove (ui_controls->requests, request);
           notify_request_done (request);
           break;
         }
@@ -548,10 +561,14 @@ destroy_ui_controls (struct wl_resource *resource)
 
   meta_topic (META_DEBUG_INPUT, "%s", __func__);
 
+  ui_controls->has_client = false;
+
   // Ensure any pressed keys and buttons are released when a client resource is
   // destroyed.
   clutter_virtual_input_device_release_pressed (ui_controls->virtual_pointer);
   clutter_virtual_input_device_release_pressed (ui_controls->virtual_keyboard);
+
+  // Clear all queues.
   g_queue_clear_full (ui_controls->requests, g_free);
   g_queue_clear_full (ui_controls->pointer_move_requests_during_grab, g_free);
   g_queue_clear_full (ui_controls->pointer_release_requests_during_grab,
@@ -569,6 +586,8 @@ bind_ui_controls (struct wl_client *client,
 
   meta_topic (META_DEBUG_INPUT, "%s id=%u requested_version=%u", __func__, id,
               version);
+
+  ui_controls->has_client = true;
 
   resource = wl_resource_create (client, &zcr_ui_controls_v1_interface,
                                  META_UI_CONTROLS_V1_VERSION, id);
